@@ -37,6 +37,7 @@ typedef struct server_state {
     int shm_fd;
     char * path;
     char * shmobj;
+    char * customized;
     int maxfd, conn_socket;
     long msi_vectors;
 } server_state_t;
@@ -49,51 +50,6 @@ void print_vec(server_state_t * s, const char * c);
 void add_new_guest(server_state_t * s);
 void parse_args(int argc, char **argv, server_state_t * s);
 int create_listening_socket(char * path);
-
-/*
-
-#define META_MAGIC 20101992
-#define META_MAGIC_OFFSET 10
-#define META_LOCK_OFFSET 12  // ??!!
-#define META_BITMAP_SIZE_OFFSET 14
-#define BITMAP_OFFSET 16
-
-
-#define IVSHMEM_FRAMESIZE 40 //in Byte
-#define WORD_SIZE (CHAR_BIT * sizeof(int))
-#define TOTAL_BITS 1000000
-//#define SETBIT(b,n) ((b)[(n)/WORD_SIZE] |= (1 << ((n) % WORD_SIZE)))
-#define SET_BIT(b,n) ((b)[(n)/WORD_SIZE] |= (1 << ((n) % WORD_SIZE)))
-#define CLR_BIT(b,n)  ((b)[(n)/WORD_SIZE] &= ~(1 << ((n) % WORD_SIZE)))
-
-#define META_MAP_SIZE 1024
-
-
-
-//OFFSETS   not needed any more <-- strct instead
-
-//#define MAGIC_OFFSET 0
-//#define MUTEX_OFFSET 4 
-//#define SIZE_OFFSET 20
-//#define BITMAP_OFFSET 24
-//#define BITMAP_SIZE_OFFSET 40   //check out sem size and adapt!
-
-#define FRAME_SIZE 4096 //in Byte
-
-typedef struct meta_data{
-    
-    int magic;
-    sem_t meta_semaphore;
-    char hostname[50];
-    int memSize;
-    int bitmapOffset;
-    int numOfFrames;
-    int frameSize;
-    int metaSize; //Byte
-}meta_data_t;
-
-       
-*/
 
 int create_metadata_for_pscom(server_state_t *s)
 {
@@ -119,29 +75,8 @@ int create_metadata_for_pscom(server_state_t *s)
 
     meta_data =(meta_data_t*)map_region;
     sem_t *mutex = &meta_data->meta_semaphore;  // use semaphore as mutex  //make reference shorter
-   
-    if (meta_data->magic == META_MAGIC){
-	
-	// @User: what to do? Seems to be initialized... Reinitialize?
-	printf("Found existing metadata block!\n(o) overwrite or (c) cancel?: ");
-	
-	int n;
-	for(n = 0; n <5; n++) {
-	char input = getchar();
-
-	if (input == 'c') return -2;
-	if (input == 'o') {
-	    printf("\nA new metadata block will be created...\n");
- 	    break;
-	}
-	
- 	printf("\nplease enter o or c\n");
-	
-	}
-
-    
-    }
-
+  
+  
     sem_init(mutex,1,1);
 
     while(sem_wait(mutex)); //wait for mutex // should usually be the only one!   
@@ -174,12 +109,12 @@ int create_metadata_for_pscom(server_state_t *s)
     long n;
 
     for(n=0; n<BitmapSize; n++){
-    bitmap[n] = 0;
+    bitmap[n] = 0;  // reset bitmap
     }
 
     for (n=0; n<metaDataFrames; n++) 
     {
-     SET_BIT(bitmap,n);  //mark all(loop) Frames which are used for meta_data 
+     SET_BIT(bitmap,n);  //mark all(loop) frames which are used for meta_data 
     }
 
     
@@ -219,37 +154,13 @@ int main(int argc, char ** argv)
         exit(-1);
     }
 
-    //  #######################################################################
+/*************************************************************************************************/
 
-	//first version: simply asking for metadata -> ToDo: arguments
-	
-	printf("Do you want to use ivshmem for pscom? (y / n / Z): ");
-
-	int n;
-	for(n = 0; n <5; n++) {
-	char input = getchar();
-
-	if (input == 'n') break;
-	if (input == 'y') {
-	    printf("\ntrying to create a metadatablock...\n");
+	    if(!strcmp(s->customized,"migration-framework")||!strcmp(s->customized, "pscom")){
  	    create_metadata_for_pscom(s);
-	    break;
-	}
-	if (input == 'Z'){
-	int* mem = NULL;
- 	int Zeros[10000] = {0};    
-        mem=mmap(NULL,sizeof(Zeros), PROT_READ|PROT_WRITE, MAP_SHARED, s->shm_fd, 0);
-	memcpy(mem,Zeros,sizeof(Zeros));
-	break;
-	}
-	
- 	printf("\nplease enter y or n\n");
-	
-	}
-	
+	    }
 
-    //  #######################################################################
-
+/*************************************************************************************************/
 
     s->conn_socket = create_listening_socket(s->path);
 
@@ -452,7 +363,7 @@ void parse_args(int argc, char **argv, server_state_t * s) {
     s->shmobj = NULL;
     s->msi_vectors = 1;
 
-	while ((c = getopt(argc, argv, "hp:s:m:n:")) != -1) {
+	while ((c = getopt(argc, argv, "hp:s:m:n:c:")) != -1) {
 
         switch (c) {
             // path to listening socket
@@ -486,6 +397,9 @@ void parse_args(int argc, char **argv, server_state_t * s) {
             case 'n':
                 s->msi_vectors = atol(optarg);
                 break;
+	    case 'c':  //customized
+		s->customized = optarg;
+		break;
             case 'h':
             default:
 	            usage(argv[0]);
@@ -543,5 +457,5 @@ int find_set(fd_set * readset, int max) {
 
 void usage(char const *prg) {
 	fprintf(stderr, "use: %s [-h]  [-p <unix socket>] [-s <shm obj>] "
-            "[-m <size in MB>] [-n <# of MSI vectors>]\n", prg);
+            "[-m <size in MB>] [-n <# of MSI vectors>] [-c <customization mode: eg. migration-framework>]\n", prg);
 }
